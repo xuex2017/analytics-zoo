@@ -51,12 +51,13 @@ public class InferenceTest extends Thread{
 //		}
 
 
-		try{
-//			model.predict(inputlist);
-			System.out.println(model.predict(inputlist).toString());
-		}catch (InterruptedException e){
-			e.printStackTrace();
-		}
+//		try{
+////			model.predict(inputlist);
+//			System.out.println(model.predict(inputlist).toString());
+//		}catch (InterruptedException e){
+//			e.printStackTrace();
+//		}
+		System.out.println(model.predict(inputlist).toString());
 	}
 	public static void main(String args[]){
 		long begin = System.currentTimeMillis();
