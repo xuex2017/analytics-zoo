@@ -95,10 +95,12 @@ public abstract class AbstractInferenceModel implements Serializable {
 		}
 		try {
 			model = modelQueue.take();
-			result = model.predict(input, inputShape);
 		} catch (InterruptedException e) {
 			throw new InferenceRuntimeException("no model available", e);
-		}finally {
+		}
+		try {
+			result = model.predict(input, inputShape);
+		} finally {
 			modelQueue.offer(model);
 		}
 		return result;
@@ -109,9 +111,11 @@ public abstract class AbstractInferenceModel implements Serializable {
 		List<List<JTensor>> result;
 		try {
 			model = modelQueue.take();
-			result = model.predict(inputs);
 		} catch (InterruptedException e) {
 			throw new InferenceRuntimeException("no model available", e);
+		}
+		try {
+			result = model.predict(inputs);
 		} finally {
 			modelQueue.offer(model);
 		}
