@@ -17,20 +17,22 @@
 package com.intel.analytics.zoo.pipeline.api.keras.python
 
 import java.nio.ByteOrder
-import java.util.{List => JList}
+import java.util
+import java.util.{List => JList, Map => JMap, HashMap => JHashMap}
 
-import com.intel.analytics.bigdl.{Criterion, DataSet}
+import com.intel.analytics.bigdl.Criterion
 import com.intel.analytics.bigdl.dataset.{DataSet, LocalDataSet, MiniBatch}
 
 import scala.collection.JavaConverters._
-import com.intel.analytics.bigdl.optim.{OptimMethod, Regularizer, ValidationMethod}
+import com.intel.analytics.bigdl.optim.{LocalPredictor, OptimMethod, Regularizer, ValidationMethod}
 import com.intel.analytics.bigdl.python.api.{EvaluatedResult, JTensor, PythonBigDLKeras, Sample}
 import com.intel.analytics.bigdl.tensor.Tensor
 import com.intel.analytics.bigdl.tensor.TensorNumericMath.TensorNumeric
 import com.intel.analytics.bigdl.nn.Container
 import com.intel.analytics.bigdl.nn.abstractnn.{AbstractModule, Activity}
 import com.intel.analytics.bigdl.nn.keras.{KerasLayer, KerasModel}
-import com.intel.analytics.bigdl.transform.vision.image.{ImageFeature, ImageFeatureToMiniBatch}
+import com.intel.analytics.bigdl.utils.Table
+import com.intel.analytics.zoo.feature.image.ImageSet
 import com.intel.analytics.zoo.pipeline.api.Net
 import com.intel.analytics.zoo.pipeline.api.autograd._
 import com.intel.analytics.zoo.pipeline.api.keras.layers._
@@ -40,7 +42,6 @@ import com.intel.analytics.zoo.pipeline.api.keras.models.{KerasNet, Model, Seque
 import com.intel.analytics.zoo.pipeline.api.keras.objectives.{MeanAbsoluteError, SparseCategoricalCrossEntropy}
 import com.intel.analytics.zoo.pipeline.api.net.{GraphNet, NetUtils, TFNet}
 import org.apache.spark.api.java.JavaRDD
-import org.apache.spark.rdd.RDD
 
 import scala.collection.mutable.ArrayBuffer
 import scala.reflect.ClassTag
@@ -88,23 +89,19 @@ class PythonZooKeras[T: ClassTag](implicit ev: TensorNumeric[T]) extends PythonB
       module: KerasNet[T],
       x: JavaRDD[Sample],
       batchSize: Int = 32,
-      epochs: Int = 10,
+      nbEpoch: Int = 10,
       validationData: JavaRDD[Sample] = null): Unit = {
-    module.fit(toJSample(x), batchSize, epochs,
+    module.fit(toJSample(x), batchSize, nbEpoch,
       if (validationData == null) null else toJSample(validationData))
   }
 
   def zooFit(
       module: KerasNet[T],
-      x: DataSet[ImageFeature],
+      x: ImageSet,
       batchSize: Int,
-      epochs: Int,
-      validationData: DataSet[ImageFeature]): Unit = {
-    val trainData = x -> ImageFeatureToMiniBatch[T](batchSize)
-    val valData =
-      if (validationData != null) validationData -> ImageFeatureToMiniBatch[T](batchSize)
-      else null
-    module.fit(trainData, epochs, valData)
+      nbEpoch: Int,
+      validationData: ImageSet): Unit = {
+    module.fit(x, batchSize, nbEpoch, validationData)
   }
 
   def zooFit(
@@ -112,7 +109,7 @@ class PythonZooKeras[T: ClassTag](implicit ev: TensorNumeric[T]) extends PythonB
       xTrain: JList[JTensor],
       yTrain: JTensor,
       batchSize: Int,
-      epochs: Int,
+      nbEpoch: Int,
       xVal: JList[JTensor],
       yVal: JTensor): Unit = {
     val trainArray = toSampleArray(xTrain.asScala.toList.map{f => toTensor(f)}, toTensor(yTrain))
@@ -122,7 +119,61 @@ class PythonZooKeras[T: ClassTag](implicit ev: TensorNumeric[T]) extends PythonB
       val valArray = toSampleArray(xVal.asScala.toList.map{f => toTensor(f)}, toTensor(yVal))
       batching(DataSet.array(valArray), batchSize)
     } else null
-    module.fit(trainData, epochs, valData)
+    module.fit(trainData, nbEpoch, valData)
+  }
+
+  def zooPredict(
+      module: KerasNet[T],
+      x: JavaRDD[Sample],
+      batchSize: Int = 32): JavaRDD[JList[Object]] = {
+    val resRDD = module.predict(x.rdd.map(toJSample), batchSize)
+    resRDD.map(activityToList).toJavaRDD()
+  }
+
+  def zooForward(model: AbstractModule[Activity, Activity, T],
+                   input: JList[JTensor],
+                   inputIsTable: Boolean): JList[Object] = {
+    val inputActivity = jTensorsToActivity(input, inputIsTable)
+    val outputActivity = model.forward(inputActivity)
+    activityToList(outputActivity)
+  }
+
+  def activityToList(outputActivity: Activity): JList[Object] = {
+    if (outputActivity.isInstanceOf[Tensor[T]]) {
+      val list = new util.ArrayList[Object]()
+      list.add(toJTensor(outputActivity.toTensor))
+      list
+    } else {
+      table2JList(outputActivity.toTable)
+    }
+  }
+
+  private def table2JList(t: Table): JList[Object] = {
+    var i = 1
+    val list = new util.ArrayList[Object]()
+    while (i <= t.length()) {
+      val item = t[Object](i)
+      if (item.isInstanceOf[Tensor[T]]) {
+        list.add(toJTensor(item.asInstanceOf[Tensor[T]]))
+      } else if (item.isInstanceOf[Table]) {
+        list.add(table2JList(item.asInstanceOf[Table]))
+      } else {
+        throw new IllegalArgumentException(s"Table contains unrecognizable objects $item")
+      }
+      i += 1
+    }
+    list
+  }
+
+  def zooPredict(
+      module: KerasNet[T],
+      x: JList[JTensor],
+      batchSize: Int): JList[JList[Object]] = {
+    val sampleArray = toSampleArray(x.asScala.toList.map{f => toTensor(f)})
+    val localPredictor = LocalPredictor(module,
+      batchPerCore = KerasUtils.calBatchPerCore(batchSize))
+    val result = localPredictor.predict(sampleArray)
+    result.map(activityToList).toList.asJava
   }
 
   def zooEvaluate(
@@ -1040,7 +1091,11 @@ class PythonZooKeras[T: ClassTag](implicit ev: TensorNumeric[T]) extends PythonB
       path: String,
       inputNames: JList[String],
       outputNames: JList[String]): TFNet = {
-    TFNet(path, inputNames.asScala, outputNames.asScala)
+    TFNet(path, inputNames.asScala.toArray, outputNames.asScala.toArray)
+  }
+
+  def createTFNet(path: String): TFNet = {
+    TFNet(path)
   }
 
   def connectInputs(module: AbstractModule[Activity, Activity, T],
@@ -1072,5 +1127,19 @@ class PythonZooKeras[T: ClassTag](implicit ev: TensorNumeric[T]) extends PythonB
   def createZooKerasTop5Accuracy(
       zeroBasedLabel: Boolean = true): ValidationMethod[T] = {
     new Top5Accuracy[T](zeroBasedLabel)
+  }
+
+  def createZooKerasWordEmbedding(
+      embeddingFile: String,
+      wordIndex: JMap[String, Int] = null,
+      trainable: Boolean = false,
+      inputShape: JList[Int] = null): WordEmbedding[T] = {
+    WordEmbedding[T](embeddingFile, if (wordIndex!= null) wordIndex.asScala.toMap else null,
+      trainable, inputShape.get(0))
+  }
+
+  def wordEmbeddingGetWordIndex(
+      embeddingFile: String): JMap[String, Int] = {
+    WordEmbedding.getWordIndex(embeddingFile).asJava
   }
 }
