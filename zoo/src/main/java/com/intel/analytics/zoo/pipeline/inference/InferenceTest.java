@@ -20,9 +20,10 @@ public class InferenceTest extends Thread{
 
 	public void run(){
 		JTensor tensorinput = new JTensor();
-		ArrayList<Integer> shape = new ArrayList<Integer>();
-		shape.add(500);
-		shape.add(200);
+//		ArrayList<Integer> shape = new ArrayList<Integer>();
+//		shape.add(500);
+//		shape.add(200);
+		int[] shape = new int[]{500, 200};
 		tensorinput.setShape(shape);
 		ArrayList<Float> data = new ArrayList<Float>();
 		String filePath = "/home/xiaxue/data/text-classification/20news-18828/sci.med/59599";//sci.med #14
