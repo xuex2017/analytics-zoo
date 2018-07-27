@@ -11,14 +11,15 @@ public class GloveTextProcessing extends ITextProcessing {
 
 	@Override
 	public Map<String, List<Float>> loadEmbedding(String embFilePath) {
-		Map<String, List<Float>> embMap = new HashMap<>();
-		try (BufferedReader br = new BufferedReader(new FileReader(embFilePath))) {
+		Map<String, List<Float>> embMap = new HashMap<String, List<Float>>();
+		try {
+			BufferedReader br = new BufferedReader(new FileReader(embFilePath));
 			for (String line; (line = br.readLine()) != null; ) {
 				String[] parts = line.split(" ", 2);
 				String word = parts[0];
 				String emb = parts[1];
 				Scanner scanner = new Scanner(emb);
-				List<Float> list = new ArrayList<>();
+				List<Float> list = new ArrayList<Float>();
 				while (scanner.hasNextFloat()) {
 					list.add(scanner.nextFloat());
 				}
